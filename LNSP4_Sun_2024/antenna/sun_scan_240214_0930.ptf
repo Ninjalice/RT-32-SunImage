@@ -1,0 +1,13 @@
+# Table of horizontal coordinates for Sun scanning
+# Celestial Object ID:  SUN
+# Spiral scanning, number of scans:      5
+# Scan time schedule:
+# Sun center calibration 	60 sec
+# 1 spiral turn				40 sec  step 0->6 arcmin
+# 2 spiral					100 sec  step 6->12 arcmin
+# 3 spiral					120 sec step 12->18 arcmin
+# 4 spiral					120 sec step 18-28 arcmin
+# 5 spiral					120 sec step 28-40 arcmin
+# Slew to sky 4 Rsun			20 sec
+# Sky calibration			60 sec
+# Slew to Sun center			20 sec
