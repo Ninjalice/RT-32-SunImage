@@ -10,6 +10,7 @@
   - [x] Apply basic convolution kernel. (Bad result)
   - [x] Apply manual non zero kernel
   - [ ] Try diferent kernels
+- [ ] Remove calibration points and calibrate it correctly
 - [ ] Try to apply gaussian blurr and noise reduction
 - [ ] Use real antena movements rather than theoretical positions.
 - [ ] Generalise code for all bands and polarizations
