@@ -3,7 +3,9 @@ from astropy.time import Time
 from astropy.coordinates import EarthLocation, AltAz, get_sun
 from astropy.table import Table
 from AntennaUtils import *
-
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+from scipy.signal import savgol_filter
 
 class Antenna:
     def __init__(self, az_offset0=+0.01, el_offset0=+0.18, az_offset2=0.0, el_offset2=0.0, description="Default Antenna"):
@@ -313,3 +315,128 @@ def bintable_to_pandas(file_path, hdu_number):
         print("Error:", e)
         return None
     
+def getFinalProcessedData(observation , sunPositionDf , data_df):
+    # Convertir Julian_Time a objetos Time de astropy
+    time = Time(sunPositionDf['UTC'], format='jd')
+
+    # Calcular las horas decimales con precisión de milisegundos para cada valor
+    decimal_seconds = []
+
+    for datetime_obj in time.datetime:
+        seconds = time_to_seconds(datetime_obj)
+        decimal_seconds.append(seconds)    
+
+    # Agregar las horas decimales al DataFrame
+    sunPositionDf['UTC'] =  np.round(np.array(decimal_seconds).astype(float), 3)
+
+    print("Interpolating data...")
+
+    columns = sunPositionDf.columns
+    interpolated_values = np.empty((sunPositionDf.shape[0] * 1000, sunPositionDf.shape[1]))
+    for i, col in enumerate(columns):
+        for j in range(len(sunPositionDf)-1):
+            interpolated_values[j*1000:(j+1)*1000, i] = np.linspace(sunPositionDf.iloc[j][col], sunPositionDf.iloc[j+1][col], 1001)[0:-1]
+
+
+    interpolated_df = pd.DataFrame(interpolated_values, columns=columns)
+    pd.set_option('display.float_format', '{:.10f}'.format)
+    
+
+    print("Filtering data...")
+
+    # Performs merging of DataFrames using different column names
+    data_df['UTC_RCP_11'] = data_df['UTC_RCP_11'].astype('float64').round(3)
+    interpolated_df['UTC'] = interpolated_df['UTC'].round(3)
+    merged_df = pd.merge(interpolated_df, data_df, left_on='UTC', right_on='UTC_RCP_11')
+
+    #['t_cal', 't1', 't2', 't3', 't4', 't5','t_slew','t_cal_2','t_slew_2']
+    num_scan = 5
+    t_scan_cumsum = np.linspace(0, 4 , 5) * observation.t_scan + observation.t_start_seconds
+
+    def filter_dataframe(df, start, end):
+        return df[(df['UTC'] >= start) & (df['UTC'] <= end)]
+
+
+    filtered_dfs = {}
+    cal_df_centre = []
+    cal_df_sky = []
+
+    columns_to_remove = ["UTC","SunX","SunY" , "UTC_RCP_11"]
+
+
+
+    # Realizar 5 iteraciones
+    for i, start_seconds in enumerate(t_scan_cumsum):
+        
+        start_t_cal_1 = start_seconds
+        end_t_cal_1 = start_seconds + observation.times_sec_dic['t_cal']
+
+        start_t_slew_1 = start_seconds + observation.times_sec_dic['t5'] 
+        end_t_slew_1 = start_seconds + observation.times_sec_dic['t_slew']
+
+        start_t_cal_2 = start_seconds + observation.times_sec_dic['t_slew'] 
+        end_t_cal_2 = start_seconds + observation.times_sec_dic['t_cal_2']
+
+        start_t_slew_2 = start_seconds + observation.times_sec_dic['t_cal_2'] 
+        end_t_slew_2 = start_seconds + observation.times_sec_dic['t_slew_2']
+
+        # Definir los filtros para cada iteración
+        filters = [
+            ('filter_it_{}_t_cal_1'.format(i+1), start_t_cal_1, end_t_cal_1),
+            ('filter_it_{}_t_slew_2'.format(i+1), start_t_slew_1, end_t_slew_1),
+            ('filter_it_{}_t_cal_2'.format(i+1), start_t_cal_2, end_t_cal_2),
+            ('filter_it_{}_t_slew_3'.format(i+1), start_t_slew_2, end_t_slew_2)
+        ]
+        
+        # Apply filters and store the filtered dataframes    
+        for filter_name, start, end in filters:
+            if (filter_name.endswith("t_cal_1")):
+                cal_df_centre.append(filter_dataframe(merged_df, start, end).drop(columns=columns_to_remove).mean().values)
+            elif (filter_name.endswith("t_cal_2")):
+                cal_df_sky.append(filter_dataframe(merged_df, start, end).drop(columns=columns_to_remove).mean().values)
+            filtered_dfs[filter_name] = filter_dataframe(merged_df, start, end)
+
+
+    print("Calibrating data...")
+
+    # Combine indices of filtered rows
+    filtered_indices = set().union(*[filtered_df.index for filtered_df in filtered_dfs.values()])
+
+    # Get the rest of the DataFrame excluding the filtered rows
+    rest_of_df = merged_df[~merged_df.index.isin(filtered_indices)]
+
+    cal_df_centre = np.array(cal_df_centre)
+    cal_df_sky = np.array(cal_df_sky)
+
+
+    max_vect = np.mean(cal_df_centre, axis=0)
+    min_vect = np.mean(cal_df_sky, axis=0)
+    
+
+    rest_of_df['RCP_11_4_11_90GHZ'] = (rest_of_df['RCP_11_4_11_90GHZ'] - min_vect[0]) / (max_vect[0] - min_vect[0])
+    rest_of_df['Filtered_RCP_11_4_11_90GHZ'] = (rest_of_df['Filtered_RCP_11_4_11_90GHZ'] - min_vect[1]) / (max_vect[1] - min_vect[1])
+
+    scaler = MinMaxScaler()
+    rest_of_df['Filtered_RCP_11_4_11_90GHZ'] = scaler.fit_transform(rest_of_df[['Filtered_RCP_11_4_11_90GHZ']])
+    rest_of_df['RCP_11_4_11_90GHZ'] = scaler.fit_transform(rest_of_df[['RCP_11_4_11_90GHZ']])
+
+    filtered_sunDf = rest_of_df[(rest_of_df['SunX']**2 + rest_of_df['SunY']**2) <= 20**2].copy()
+
+    
+    return filtered_sunDf
+
+
+def processData(data_df):
+    # Extracting columns and dropping NaN values
+    UTC_RCP_11 = np.round(data_df['UTC RCP 11'].dropna() * 3600, 3)
+    RCP_11_4_11_90GHZ = data_df['RCP 11 11.90GHZ'].dropna()
+
+    # Creating DataFrame with two columns
+    RCP_11_df = pd.DataFrame({'UTC_RCP_11': UTC_RCP_11.values, 'RCP_11_4_11_90GHZ': RCP_11_4_11_90GHZ.values})
+
+    # Applying Savitzky-Golay filter
+    filtered_RCP_11_4_11_90GHZ = savgol_filter(RCP_11_df['RCP_11_4_11_90GHZ'], window_length=15, polyorder=2)
+
+    # Add filtered data as a new column in the DataFrame
+    RCP_11_df['Filtered_RCP_11_4_11_90GHZ'] = filtered_RCP_11_4_11_90GHZ
+    return RCP_11_df
