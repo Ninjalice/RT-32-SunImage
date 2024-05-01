@@ -7,6 +7,14 @@ import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from scipy.signal import savgol_filter
 
+class Weather:
+    def __init__(self , temperature, pressure, relative_humidity, obswl):
+        self.temperature  = temperature
+        self.pressure  = pressure
+        self.relative_humidity  = relative_humidity
+        self.obswl  = obswl               
+    
+
 class Antenna:
     def __init__(self, az_offset0=+0.01, el_offset0=+0.18, az_offset2=0.0, el_offset2=0.0, description="Default Antenna"):
         self.az_offset0 = az_offset0
@@ -32,8 +40,8 @@ class RT32(Antenna):
 
 
 class SpiralSunObservation:
-    def __init__(self , antenna_instance : Antenna,year,month,day,hour_start,minute_start):
-
+    def __init__(self , weather: Weather , antenna_instance : Antenna,year,month,day,hour_start,minute_start):
+        self.weather = weather
         self.antenna = antenna_instance
 
         self.year = year
@@ -175,9 +183,10 @@ class SpiralSunObservation:
         el_sun = self.sun_location.transform_to(AltAz(obstime=Time(utc, format='jd'), location=self.antenna.location)).alt.deg
 
         az_anten = az_sun + xx1 / np.cos(np.deg2rad(el_sun)) / 60.
-        el_anten = el_sun + yy1 / 60.
+        el_anten = el_sun + yy1 / 60.    
+       
 
-        return az_anten, el_anten , az_sun , el_sun , xx1 , yy1, utc
+        return az_anten, el_anten , az_sun , el_sun , xx1 , yy1, utc 
 
     def generateFile(self, path  , az_anten , el_anten , utc):
         with open(path + self.file_name1, 'w') as file1:
@@ -216,7 +225,7 @@ class SpiralSunObservation:
 
         
             for i in range(len(utc)):
-                file1.write(f"{Time(utc[i], format='jd').iso}.00 \t\t {az_anten[i]:.5f} \t\t {el_anten[i]:.5f}\n")
+                file1.write(f"{Time(utc[i], format='jd').isot}.00 \t\t {az_anten[i]:.5f} \t\t {el_anten[i]:.5f}\n")
 
         print('-------------------------------------------------------------')
         print('Saved: ', self.file_name1, "  ",  len(utc), "  points")
@@ -275,6 +284,16 @@ def time_to_seconds(time):
     microsecond = time.microsecond
     decimal_hour = hour + minute / 60 + second / 3600 + microsecond / 3600000000
     return decimal_hour * 3600
+
+def seconds_to_time(year, month, day, seconds):
+    hours = int(seconds // 3600)
+    remaining_seconds = seconds % 3600
+    minutes = int(remaining_seconds // 60)
+    remaining_seconds %= 60
+    remaining_seconds = int(remaining_seconds)
+
+    time = Time(f"{year}-{month:02d}-{day:02d} {hours}:{minutes}:{remaining_seconds}")
+    return time.isot
 
 
 def bintable_to_pandas(file_path, hdu_number):
@@ -422,7 +441,7 @@ def getFinalProcessedData(observation , sunPositionDf , data_df):
 
     filtered_sunDf = rest_of_df[(rest_of_df['SunX']**2 + rest_of_df['SunY']**2) <= 20**2].copy()
 
-    
+    filtered_sunDf["isoT_time"] = filtered_sunDf.apply(lambda row: seconds_to_time(observation.year, observation.month, observation.day,row["UTC"]), axis=1)
     return filtered_sunDf
 
 
