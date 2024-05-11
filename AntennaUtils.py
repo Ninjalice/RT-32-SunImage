@@ -364,9 +364,9 @@ def getFinalProcessedData(observation , sunPositionDf , data_df):
     print("Filtering data...")
 
     # Performs merging of DataFrames using different column names
-    data_df['UTC_RCP_11'] = data_df['UTC_RCP_11'].astype('float64').round(3)
+    data_df['UTC_11_4_11_90GHZ'] = data_df['UTC_11_4_11_90GHZ'].astype('float64').round(3)
     interpolated_df['UTC'] = interpolated_df['UTC'].round(3)
-    merged_df = pd.merge(interpolated_df, data_df, left_on='UTC', right_on='UTC_RCP_11')
+    merged_df = pd.merge(interpolated_df, data_df, left_on='UTC', right_on='UTC_11_4_11_90GHZ')
 
     #['t_cal', 't1', 't2', 't3', 't4', 't5','t_slew','t_cal_2','t_slew_2']
     num_scan = 5
@@ -380,8 +380,9 @@ def getFinalProcessedData(observation , sunPositionDf , data_df):
     cal_df_centre = []
     cal_df_sky = []
 
-    columns_to_remove = ["UTC","SunX","SunY" , "UTC_RCP_11"]
+    columns_to_remove =  ["UTC","SunX","SunY" , "UTC_11_4_11_90GHZ"]
 
+    print(merged_df.columns)
 
 
     # Realizar 5 iteraciones
@@ -427,17 +428,19 @@ def getFinalProcessedData(observation , sunPositionDf , data_df):
     cal_df_centre = np.array(cal_df_centre)
     cal_df_sky = np.array(cal_df_sky)
 
-
-    max_vect = np.mean(cal_df_centre, axis=0)
-    min_vect = np.mean(cal_df_sky, axis=0)
     
+    max_vect = np.min(cal_df_centre , axis=0)
+    min_vect = np.max(cal_df_sky , axis=0)
+    
+    print("Cantre max: ", max_vect)
+    print("Sky min: ", min_vect)
 
-    rest_of_df['RCP_11_4_11_90GHZ'] = (rest_of_df['RCP_11_4_11_90GHZ'] - min_vect[0]) / (max_vect[0] - min_vect[0])
-    rest_of_df['Filtered_RCP_11_4_11_90GHZ'] = (rest_of_df['Filtered_RCP_11_4_11_90GHZ'] - min_vect[1]) / (max_vect[1] - min_vect[1])
+    rest_of_df['STOKE_I_11_4_11_90GHZ'] = (rest_of_df['STOKE_I_11_4_11_90GHZ'] - min_vect[0]) / (max_vect[0] - min_vect[0])
+    rest_of_df['STOKE_V_11_4_11_90GHZ'] = (rest_of_df['STOKE_V_11_4_11_90GHZ'] - min_vect[1]) / (max_vect[1] - min_vect[1])
 
-    scaler = MinMaxScaler()
-    rest_of_df['Filtered_RCP_11_4_11_90GHZ'] = scaler.fit_transform(rest_of_df[['Filtered_RCP_11_4_11_90GHZ']])
-    rest_of_df['RCP_11_4_11_90GHZ'] = scaler.fit_transform(rest_of_df[['RCP_11_4_11_90GHZ']])
+    # scaler = MinMaxScaler()
+    # rest_of_df['Filtered_RCP_11_4_11_90GHZ'] = scaler.fit_transform(rest_of_df[['Filtered_RCP_11_4_11_90GHZ']])
+    # rest_of_df['RCP_11_4_11_90GHZ'] = scaler.fit_transform(rest_of_df[['RCP_11_4_11_90GHZ']])
 
     filtered_sunDf = rest_of_df[(rest_of_df['SunX']**2 + rest_of_df['SunY']**2) <= 20**2].copy()
 
@@ -446,16 +449,28 @@ def getFinalProcessedData(observation , sunPositionDf , data_df):
 
 
 def processData(data_df):
+    print(data_df.columns)
+
+    # ['LCP 01 4.07GHZ', 'LCP 04 6.42GHZ', 'LCP 07 8.40GHZ', 'LCP 09 9.80GHZ',
+    #    'LCP 11 11.90GHZ', 'RCP 01 4.07GHZ', 'RCP 04 6.42GHZ', 'RCP 07 8.40GHZ',
+    #    'RCP 09 9.80GHZ', 'RCP 11 11.90GHZ', 'UTC LCP 01', 'UTC LCP 04',
+    #    'UTC LCP 07', 'UTC LCP 09', 'UTC LCP 11', 'UTC RCP 01', 'UTC RCP 04',
+    #    'UTC RCP 07', 'UTC RCP 09', 'UTC RCP 11']
+
     # Extracting columns and dropping NaN values
     UTC_RCP_11 = np.round(data_df['UTC RCP 11'].dropna() * 3600, 3)
     RCP_11_4_11_90GHZ = data_df['RCP 11 11.90GHZ'].dropna()
+    LCP_11_4_11_90GHZ = data_df['LCP 11 11.90GHZ'].dropna()
+
+    STOKE_I_11_4_11_90GHZ = (RCP_11_4_11_90GHZ.values + LCP_11_4_11_90GHZ.values) / 2 
+    STOKE_V_11_4_11_90GHZ = (RCP_11_4_11_90GHZ.values - LCP_11_4_11_90GHZ.values) / 2 
+
+    print(STOKE_I_11_4_11_90GHZ.size)
+    print(STOKE_V_11_4_11_90GHZ.size)
+    print(UTC_RCP_11.size)
 
     # Creating DataFrame with two columns
-    RCP_11_df = pd.DataFrame({'UTC_RCP_11': UTC_RCP_11.values, 'RCP_11_4_11_90GHZ': RCP_11_4_11_90GHZ.values})
+    BAND_11_df = pd.DataFrame({'UTC_11_4_11_90GHZ': UTC_RCP_11.values, 'STOKE_I_11_4_11_90GHZ': STOKE_I_11_4_11_90GHZ,'STOKE_V_11_4_11_90GHZ': STOKE_V_11_4_11_90GHZ})
 
-    # Applying Savitzky-Golay filter
-    filtered_RCP_11_4_11_90GHZ = savgol_filter(RCP_11_df['RCP_11_4_11_90GHZ'], window_length=15, polyorder=2)
-
-    # Add filtered data as a new column in the DataFrame
-    RCP_11_df['Filtered_RCP_11_4_11_90GHZ'] = filtered_RCP_11_4_11_90GHZ
-    return RCP_11_df
+   
+    return BAND_11_df
