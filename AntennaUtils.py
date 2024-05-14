@@ -435,8 +435,18 @@ def getFinalProcessedData(observation , sunPositionDf , data_df):
     print("Cantre max: ", max_vect)
     print("Sky min: ", min_vect)
 
-    rest_of_df['STOKE_I_11_4_11_90GHZ'] = (rest_of_df['STOKE_I_11_4_11_90GHZ'] - min_vect[0]) / (max_vect[0] - min_vect[0])
-    rest_of_df['STOKE_V_11_4_11_90GHZ'] = (rest_of_df['STOKE_V_11_4_11_90GHZ'] - min_vect[1]) / (max_vect[1] - min_vect[1])
+    rest_of_df['RCP_11_4_11_90GHZ'] = (rest_of_df['RCP_11_4_11_90GHZ'] - min_vect[0]) / (max_vect[0] - min_vect[0])
+    rest_of_df['LCP_11_4_11_90GHZ'] = (rest_of_df['LCP_11_4_11_90GHZ'] - min_vect[1]) / (max_vect[1] - min_vect[1])
+
+ 
+
+    #     # Crea el objeto MinMaxScaler
+    # scaler = MinMaxScaler(feature_range=(0, 3))
+
+    # # Ajusta y transforma los datos
+    # rest_of_df['STOKE_I_11_4_11_90GHZ'] = scaler.fit_transform(rest_of_df[['STOKE_I_11_4_11_90GHZ']])
+
+
 
     # scaler = MinMaxScaler()
     # rest_of_df['Filtered_RCP_11_4_11_90GHZ'] = scaler.fit_transform(rest_of_df[['Filtered_RCP_11_4_11_90GHZ']])
@@ -444,8 +454,8 @@ def getFinalProcessedData(observation , sunPositionDf , data_df):
 
     filtered_sunDf = rest_of_df[(rest_of_df['SunX']**2 + rest_of_df['SunY']**2) <= 20**2].copy()
 
-    filtered_sunDf["isoT_time"] = filtered_sunDf.apply(lambda row: seconds_to_time(observation.year, observation.month, observation.day,row["UTC"]), axis=1)
-    return filtered_sunDf
+    rest_of_df["isoT_time"] = rest_of_df.apply(lambda row: seconds_to_time(observation.year, observation.month, observation.day,row["UTC"]), axis=1)
+    return rest_of_df
 
 
 def processData(data_df):
@@ -462,15 +472,15 @@ def processData(data_df):
     RCP_11_4_11_90GHZ = data_df['RCP 11 11.90GHZ'].dropna()
     LCP_11_4_11_90GHZ = data_df['LCP 11 11.90GHZ'].dropna()
 
-    STOKE_I_11_4_11_90GHZ = (RCP_11_4_11_90GHZ.values + LCP_11_4_11_90GHZ.values) / 2 
-    STOKE_V_11_4_11_90GHZ = (RCP_11_4_11_90GHZ.values - LCP_11_4_11_90GHZ.values) / 2 
+    # STOKE_I_11_4_11_90GHZ = (RCP_11_4_11_90GHZ.values + LCP_11_4_11_90GHZ.values) / 2 
+    # STOKE_V_11_4_11_90GHZ = ( RCP_11_4_11_90GHZ.values - LCP_11_4_11_90GHZ.values) / 2 
 
-    print(STOKE_I_11_4_11_90GHZ.size)
-    print(STOKE_V_11_4_11_90GHZ.size)
-    print(UTC_RCP_11.size)
+    # print(STOKE_I_11_4_11_90GHZ.size)
+    # print(STOKE_V_11_4_11_90GHZ.size)
+    # print(UTC_RCP_11.size)
 
     # Creating DataFrame with two columns
-    BAND_11_df = pd.DataFrame({'UTC_11_4_11_90GHZ': UTC_RCP_11.values, 'STOKE_I_11_4_11_90GHZ': STOKE_I_11_4_11_90GHZ,'STOKE_V_11_4_11_90GHZ': STOKE_V_11_4_11_90GHZ})
+    BAND_11_df = pd.DataFrame({'UTC_11_4_11_90GHZ': UTC_RCP_11.values, 'RCP_11_4_11_90GHZ': RCP_11_4_11_90GHZ,'LCP_11_4_11_90GHZ': RCP_11_4_11_90GHZ})
 
    
     return BAND_11_df
