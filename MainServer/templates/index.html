@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>UDP Receiver Control</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.0/socket.io.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        h1, h2 {
+            text-align: center;
+        }
+        .container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        .input-group {
+            margin: 10px 0;
+        }
+        #dataContainer {
+            border: 1px solid #ccc;
+            padding: 10px;
+            width: 80%;
+            height: 400px;
+            overflow-y: scroll;
+            display: flex;
+            flex-direction: column-reverse;
+            margin: 20px 0;
+        }
+        button {
+            margin: 5px;
+        }
+    </style>
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const socket = io();
+
+            socket.on('new_data', function(data) {
+                const dataContainer = document.getElementById('dataContainer');
+                const div = document.createElement('div');
+                div.textContent = `Timestamp: ${data.timestamp}, Sensor Data: ${data.sensor_data}`;
+                dataContainer.prepend(div);
+            });
+
+            document.getElementById('startButton').addEventListener('click', () => {
+                const dateInput = document.getElementById('dateInput').value;
+                const timeInput = document.getElementById('timeInput').value;
+                fetch('/startReceiver', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ date: dateInput, time: timeInput })
+                })
+                .then(response => response.json())
+                .then(data => alert(data.message));
+            });
+
+            document.getElementById('stopButton').addEventListener('click', () => {
+                fetch('/stopReceiver', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => alert(data.message));
+            });
+        });
+    </script>
+</head>
+<body>
+    <h1>UDP Receiver Control</h1>
+    <div class="container">
+        <div class="input-group">
+            <label for="dateInput">Fecha para archivo (YYYY-MM-DD):</label>
+            <input type="date" id="dateInput">
+        </div>
+        <div class="input-group">
+            <label for="timeInput">Hora para archivo (HH:MM):</label>
+            <input type="time" id="timeInput">
+        </div>
+        <button id="startButton">Start Receiver</button>
+        <button id="stopButton">Stop Receiver</button>
+    </div>
+    <h2>Received Data</h2>
+    <div id="dataContainer"></div>
+</body>
+</html>

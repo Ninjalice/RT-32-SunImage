@@ -47,7 +47,7 @@ def udp_transmitter(ip, port):
             sock.sendto(packet_buffer, (ip, port))
 
             # Esperar 1 milisegundo antes de enviar el siguiente paquete
-            time.sleep(0.01)
+            time.sleep(1)
 
     except Exception as e:
         print(f"Error enviando el mensaje: {e}")
