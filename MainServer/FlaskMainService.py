@@ -7,6 +7,9 @@ from datetime import datetime
 from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit
 import json
+from WeatherUtils import getCurrentWeather
+from AntennaUtils import *
+import astropy.units as u
 
 app = Flask(__name__)
 socketio = SocketIO(app)
@@ -24,6 +27,32 @@ monitor_thread = None
 running = False
 
 output_file = None
+
+# RT32 location (Ventspils, Latvia)
+rt32_antenna = RT32()
+rt32_antenna.set_location(latitude=57.5535171694, longitude=21.8545525000, elevation=20)
+
+
+def calculate_antenna_positions(year,month,day,hour,minute):
+      
+    currentWather = getCurrentWeather()
+
+    # Define constants
+    path = ''
+
+    temperature = u.Quantity(currentWather.temperature_2m, unit=u.deg_C)
+    pressure = u.Quantity(currentWather.surface_pressure, unit=u.hPa)
+    relative_humidity = u.Quantity(currentWather.relative_humidity_2m, unit=u.percent)
+    obswl =u.Quantity(50000, unit=u.nm) 
+
+    weather = Weather(temperature, pressure, relative_humidity, obswl)
+
+    observation = SpiralSunObservation(weather,rt32_antenna , year , month , day , hour , minute)
+
+    az_anten, el_anten , az_sun , el_sun , xx1 , yy1, utc = observation.calculatePositions()
+    observation.generateFile(path, az_anten , el_anten , utc)  
+
+    return True
 
 def udp_receiver(ip, port, buffer_queue):
     global running
@@ -110,6 +139,37 @@ def stop_receiver():
         return jsonify({"message": "Receiver stopped"}), 200
     else:
         return jsonify({"message": "Receiver is not running"}), 200
+
+
+@app.route('/getCurrentWeather', methods=['POST'])
+def getWeatherForecast():
+    currentWeather = getCurrentWeather()
+  
+    return currentWeather,200
+
+@app.route('/calculate_antenna_positions', methods=['POST'])
+def calculate_antenna_positions():
+    data = request.get_json()
+    year = data.get('date')
+    month = data.get('time')
+    day = data.get('date')
+    hour = data.get('time')
+    minute = data.get('date')  
+
+    print(year, month, day, hour, minute)
+    
+    if not all([year, month, day, hour, minute]):
+        return jsonify(400, 'Missing date or time information')
+    if not all(map(str.isdigit, [year, month, day, hour, minute])):
+        return jsonify(400, 'Year, month, day, hour, and minute must be integers')
+    if not (len(year) == 4 and len(month) == 2 and len(day) == 2 and len(hour) == 2 and len(minute) == 2):
+        return jsonify(400, 'Year must have 4 digits, and month, day, hour, and minute must have 2 digits each')
+
+    antenna_file_thread = threading.Thread(target=calculate_antenna_positions, args=(year,month,day,hour,minute))
+    antenna_file_thread.daemon = True
+    antenna_file_thread.start()
+
+    return jsonify({'message': 'Antenna positions calculated successfully'})
 
 @app.route('/')
 def index():
