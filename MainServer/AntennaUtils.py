@@ -483,6 +483,8 @@ def processData(data_df):
 
     # Creating DataFrame with two columns
     BAND_11_df = pd.DataFrame({'UTC_11_4_11_90GHZ': UTC_RCP_11.values, 'RCP_11_4_11_90GHZ': RCP_11_4_11_90GHZ,'LCP_11_4_11_90GHZ': RCP_11_4_11_90GHZ})
-
    
     return BAND_11_df
+
+def createImages():
+    return True
