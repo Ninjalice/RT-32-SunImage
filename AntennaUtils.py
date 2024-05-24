@@ -1,11 +1,13 @@
 import numpy as np
 from astropy.time import Time
-from astropy.coordinates import EarthLocation, AltAz, get_sun
+from astropy.coordinates import EarthLocation, AltAz, get_sun ,SkyCoord
 from astropy.table import Table
 from AntennaUtils import *
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
 from scipy.signal import savgol_filter
+import astropy.units as u
+from sunpy.coordinates import frames, sun
 
 class Weather:
     def __init__(self , temperature, pressure, relative_humidity, obswl):
@@ -92,6 +94,7 @@ class SpiralSunObservation:
         
     
     def calculatePositions(self):
+        print("Starting calculation")
         # Calculate coordinates
         x = np.zeros(700)
         y = np.zeros(700)
@@ -334,7 +337,7 @@ def bintable_to_pandas(file_path, hdu_number):
         print("Error:", e)
         return None
     
-def getFinalProcessedData(observation , sunPositionDf , data_df):
+def getFinalProcessedDataOLD(observation , sunPositionDf , data_df):
     # Convertir Julian_Time a objetos Time de astropy
     time = Time(sunPositionDf['UTC'], format='jd')
 
@@ -458,29 +461,214 @@ def getFinalProcessedData(observation , sunPositionDf , data_df):
     return rest_of_df
 
 
-def processData(data_df):
+def getFinalProcessedData(observation, sunPositionDf, data_dfs):
+
+    # Convertir Julian_Time a objetos Time de astropy
+    time = Time(sunPositionDf['UTC'], format='jd')
+
+    # Calcular las horas decimales con precisión de milisegundos para cada valor
+    decimal_seconds = [time_to_seconds(datetime_obj) for datetime_obj in time.datetime]
+
+    # Agregar las horas decimales al DataFrame
+    sunPositionDf['UTC'] = np.round(np.array(decimal_seconds).astype(float), 3)
+
+    print("Interpolating data...")
+
+    columns = sunPositionDf.columns
+    interpolated_values = np.empty((sunPositionDf.shape[0] * 1000, sunPositionDf.shape[1]))
+    for i, col in enumerate(columns):
+        for j in range(len(sunPositionDf)-1):
+            interpolated_values[j*1000:(j+1)*1000, i] = np.linspace(sunPositionDf.iloc[j][col], sunPositionDf.iloc[j+1][col], 1001)[0:-1]
+
+    interpolated_df = pd.DataFrame(interpolated_values, columns=columns)
+    pd.set_option('display.float_format', '{:.10f}'.format)
+
+    print("Filtering data...")
+
+    # Diccionario para almacenar los DataFrames procesados por banda
+    band_processed_dfs = {}
+
+    for band, data_df in data_dfs.items():
+        data_df[f'UTC_{band}'] = data_df[f'UTC_{band}'].astype('float64').round(3)
+        interpolated_df['UTC'] = interpolated_df['UTC'].round(3)
+        merged_df = pd.merge(interpolated_df, data_df, left_on='UTC', right_on=f'UTC_{band}')
+
+        num_scan = 5
+        t_scan_cumsum = np.linspace(0, 4, 5) * observation.t_scan + observation.t_start_seconds
+
+        def filter_dataframe(df, start, end):
+            return df[(df['UTC'] >= start) & (df['UTC'] <= end)]
+
+        filtered_dfs = {}
+        cal_df_centre = []
+        cal_df_sky = []
+
+        columns_to_remove = ["UTC", "SunX", "SunY", f'UTC_{band}']
+
+        print(merged_df.columns)
+
+        for i, start_seconds in enumerate(t_scan_cumsum):
+            start_t_cal_1 = start_seconds
+            end_t_cal_1 = start_seconds + observation.times_sec_dic['t_cal']
+
+            start_t_slew_1 = start_seconds + observation.times_sec_dic['t5']
+            end_t_slew_1 = start_seconds + observation.times_sec_dic['t_slew']
+
+            start_t_cal_2 = start_seconds + observation.times_sec_dic['t_slew']
+            end_t_cal_2 = start_seconds + observation.times_sec_dic['t_cal_2']
+
+            start_t_slew_2 = start_seconds + observation.times_sec_dic['t_cal_2']
+            end_t_slew_2 = start_seconds + observation.times_sec_dic['t_slew_2']
+
+            filters = [
+                (f'filter_it_{i+1}_t_cal_1', start_t_cal_1, end_t_cal_1),
+                (f'filter_it_{i+1}_t_slew_2', start_t_slew_1, end_t_slew_1),
+                (f'filter_it_{i+1}_t_cal_2', start_t_cal_2, end_t_cal_2),
+                (f'filter_it_{i+1}_t_slew_3', start_t_slew_2, end_t_slew_2)
+            ]
+
+            for filter_name, start, end in filters:
+                if filter_name.endswith("t_cal_1"):
+                    cal_df_centre.append(filter_dataframe(merged_df, start, end).drop(columns=columns_to_remove).mean().values)
+                elif filter_name.endswith("t_cal_2"):
+                    cal_df_sky.append(filter_dataframe(merged_df, start, end).drop(columns=columns_to_remove).mean().values)
+                filtered_dfs[filter_name] = filter_dataframe(merged_df, start, end)
+
+        print("Calibrating data...")
+
+        filtered_indices = set().union(*[filtered_df.index for filtered_df in filtered_dfs.values()])
+        rest_of_df = merged_df[~merged_df.index.isin(filtered_indices)]
+
+        cal_df_centre = np.array(cal_df_centre)
+        cal_df_sky = np.array(cal_df_sky)
+
+        max_vect = np.min(cal_df_centre, axis=0)
+        min_vect = np.max(cal_df_sky, axis=0)
+
+        rest_of_df[f'STOKE_I_{band}'] = (rest_of_df[f'STOKE_I_{band}'] - min_vect[0]) / (max_vect[0] - min_vect[0])
+        rest_of_df[f'STOKE_V_{band}'] = (rest_of_df[f'STOKE_V_{band}'] - min_vect[1]) / (max_vect[1] - min_vect[1])
+
+        filtered_sunDf = rest_of_df[(rest_of_df['SunX']**2 + rest_of_df['SunY']**2) <= 20**2].copy()
+        rest_of_df["isoT_time"] = rest_of_df.apply(lambda row: seconds_to_time(observation.year, observation.month, observation.day, row["UTC"]), axis=1)
+        band_processed_dfs[band] = rest_of_df
+
+    return band_processed_dfs
+
+
+def rename_columns(data_df):
+    print("Renaming columns")
+    # Renombrar las columnas eliminando los dos primeros números y manteniendo los prefijos LCP y RCP
+    renamed_columns = {
+        col: f"{col.split()[0]} {col.split()[2]}"
+        if col.startswith(('LCP', 'RCP'))
+        else col
+        for col in data_df.columns
+    }
+    data_df = data_df.rename(columns=renamed_columns)
+
+     # Tabla de mapeo de números a bandas
+    band_mapping = {
+        '01': '4.07GHZ',
+        '04': '6.42GHZ',
+        '07': '8.40GHZ',
+        '09': '9.80GHZ',
+        '11': '11.90GHZ'
+    }
+
+    # Renombrar columnas UTC
+    renamed_columns = {
+        col: f'UTC {col.split()[1]} {band_mapping[col.split()[2]]}' 
+        if col.startswith('UTC') and col.split()[2] in list(band_mapping.keys())
+        else col
+        for col in data_df.columns
+    }
+    data_df = data_df.rename(columns=renamed_columns)
+
+    return data_df
+
+def processData(data_df):   
+
+
+    data_df = rename_columns(data_df)
+
     print(data_df.columns)
+    # Lista de bandas a procesar (sin los dos primeros números)
+    bands = ['4.07GHZ', '6.42GHZ', '8.40GHZ', '9.80GHZ', '11.90GHZ']
 
-    # ['LCP 01 4.07GHZ', 'LCP 04 6.42GHZ', 'LCP 07 8.40GHZ', 'LCP 09 9.80GHZ',
-    #    'LCP 11 11.90GHZ', 'RCP 01 4.07GHZ', 'RCP 04 6.42GHZ', 'RCP 07 8.40GHZ',
-    #    'RCP 09 9.80GHZ', 'RCP 11 11.90GHZ', 'UTC LCP 01', 'UTC LCP 04',
-    #    'UTC LCP 07', 'UTC LCP 09', 'UTC LCP 11', 'UTC RCP 01', 'UTC RCP 04',
-    #    'UTC RCP 07', 'UTC RCP 09', 'UTC RCP 11']
+    # Diccionario para almacenar los DataFrames de cada banda
+    band_dfs = {}
 
-    # Extracting columns and dropping NaN values
-    UTC_RCP_11 = np.round(data_df['UTC RCP 11'].dropna() * 3600, 3)
-    RCP_11_4_11_90GHZ = data_df['RCP 11 11.90GHZ'].dropna()
-    LCP_11_4_11_90GHZ = data_df['LCP 11 11.90GHZ'].dropna()
+    for band in bands:
+        # Extracción y redondeo de UTC
+        UTC_RCP = np.round(data_df[f'UTC RCP {band}'].dropna() * 3600, 3)
+        UTC_LCP = np.round(data_df[f'UTC LCP {band}'].dropna() * 3600, 3)
+        RCP = data_df[f'RCP {band}'].dropna()
+        LCP = data_df[f'LCP {band}'].dropna()
 
-    # STOKE_I_11_4_11_90GHZ = (RCP_11_4_11_90GHZ.values + LCP_11_4_11_90GHZ.values) / 2 
-    # STOKE_V_11_4_11_90GHZ = ( RCP_11_4_11_90GHZ.values - LCP_11_4_11_90GHZ.values) / 2 
+        STOKE_I = (RCP.values + LCP.values) / 2 
+        STOKE_V = ( RCP.values - LCP.values) / 2 
 
-    # print(STOKE_I_11_4_11_90GHZ.size)
-    # print(STOKE_V_11_4_11_90GHZ.size)
-    # print(UTC_RCP_11.size)
+        # print(STOKE_I_11_4_11_90GHZ.size)
+        # print(STOKE_V_11_4_11_90GHZ.size)
+        # print(UTC_RCP_11.size)      
 
-    # Creating DataFrame with two columns
-    BAND_11_df = pd.DataFrame({'UTC_11_4_11_90GHZ': UTC_RCP_11.values, 'RCP_11_4_11_90GHZ': RCP_11_4_11_90GHZ,'LCP_11_4_11_90GHZ': RCP_11_4_11_90GHZ})
+        # Crear DataFrame para la banda actual
+        band_df = pd.DataFrame({
+            f'UTC_{band}': UTC_RCP.values,          
+            f'STOKE_I_{band}': STOKE_I,
+            f'STOKE_V_{band}': STOKE_V
+        })
 
-   
-    return BAND_11_df
+        # Almacenar en el diccionario
+        band_dfs[band] = band_df
+
+    return band_dfs
+
+def createImages():
+    return True
+
+def process_all_heliocentric_coordinates(band_processed_dfs, observation):
+    def process_heliocentric_coordinates(band_df, observation):
+        coordsXHelio = []
+        coordsYHelio = []
+
+        # Convert the array of times into a list of Time objects
+        times = [Time(t) for t in band_df['isoT_time']]
+
+        # Calculate the sun's positions for each time in the list
+        az_sun = observation.sun_location.transform_to(AltAz(obstime=times, location=observation.antenna.location)).az.deg
+        el_sun = observation.sun_location.transform_to(AltAz(obstime=times, location=observation.antenna.location)).alt.deg
+
+        az_anten = az_sun + band_df['SunX'] / np.cos(np.deg2rad(el_sun)) / 60.
+        el_anten = el_sun + band_df['SunY'] / 60.    
+
+        band_df['az_anten'] = az_anten
+        band_df['el_anten'] = el_anten
+
+        # Iterar sobre los diferentes momentos de tiempo
+        for index, row in band_df.iterrows():
+            # Convert the AltAz coordinates from the DataFrame from degrees to radians
+            el_deg = row['el_anten'] * u.deg
+            az_deg = row['az_anten'] * u.deg
+
+            # Set the observation time
+            obstime = row['isoT_time']
+
+            # Convertir a coordenadas heliocéntricas
+            frame_altaz = AltAz(obstime=Time(obstime), location=observation.antenna.location)
+            sun_helio = SkyCoord(alt=el_deg, az=az_deg, observer='earth', distance=sun.earth_distance(obstime), frame=frame_altaz).transform_to(frames.Helioprojective)
+
+            # Append the transformed coordinates to the list
+            coordsXHelio.append(sun_helio.Tx.value)
+            coordsYHelio.append(sun_helio.Ty.value)
+
+        band_df['tx_helio_anten'] = coordsXHelio
+        band_df['ty_helio_anten'] = coordsYHelio
+
+        return band_df
+    
+    # Aplicar la función de procesamiento a cada DataFrame en el diccionario
+    for band, df in band_processed_dfs.items():
+        band_processed_dfs[band] = process_heliocentric_coordinates(df, observation)
+    
+    return band_processed_dfs
