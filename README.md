@@ -1,25 +1,28 @@
-# RT-32
+# Imaging of multidimensional spectropolarimetric maps of the Sun obtained by Irbene radio astronomical observations.
+
+
+The objective of the work is to develop open source tool, which is based on Python
+astronomical libraries, to produce 1D, 2D and 3D maps of Sun. Imaging will be based on regular
+microwave solar observations conducted by VIRAC on radio telescope RT-32. For the
+construction of Stokes I and Stokes V maps the spatial scanning procedure of the solar disk in
+the screen plane is used. The series of observations were obtained with the solar spectral
+polarimeter (Low Noise Spectral Polarimeter ver. 4 –LNSP4) hardware set. The scanning
+procedure was represented by the spiral movement of the antenna beam around the calculated
+solar disk centre. Further the maps are constructed after recalculations of observed samples from
+a time-antenna position domain to the screen plane by the regularization with bilinear or
+modified Richardson-Lucy (MLM) methods.
+
+## Key Functionalities
+
+- Processes data from the VIRAC instrument on the RT-32 radio telescope.
+- Constructs Stokes I and Stokes V maps using spatial scanning procedures for the solar disk.
+- Employs bilinear and modified Richardson-Lucy (MLM) regularization methods for map reconstruction.
+- Offers a user-friendly interface through the `Main.ipynb` Jupyter Notebook.
+
 ---
 
-## TODO 
+![Sun image](images/endika_stokesI_240425_4GHz.png)
 
-- [x] Fix UTC time data tipe from jd and decimal hour to decimal seconds.
-- [x] Fix interpolaion of antena movement for merging with real data.
-- [x] Create basic image with data points.
-- [ ] Apply convolution to image.
-  - [x] Apply basic convolution kernel. (Bad result)
-  - [x] Apply manual non zero kernel
-  - [ ] Try diferent kernels
-- [ ]  Apply scipy.signal savgol_filter
-- [ ] Remove calibration points and calibrate it correctly
-- [ ] Try to apply gaussian blurr and noise reduction
-- [ ] Use real antena movements rather than theoretical positions.
-- [ ] Generalise code for all bands and polarizations
-  
+---
 
-## FUTURE 
-
-- [ ] Think about repository and project hosting.
-- [ ] Create React control webpage.
-- [ ] Think of automatic band change in Arduino.
-- [ ] Think of automatic uploading of antena positions for plc.
+Made by Endika Aguirre 2024
