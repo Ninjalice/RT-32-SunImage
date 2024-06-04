@@ -17,7 +17,7 @@
 # End Time, (UTC), hours: 2024-02-15 12:20:00.000
 # Mean observation time (UTC): 2024-02-15 11:52:30.000
 # Az offset          : 0.01 deg.
-# El offset          : 0.18 deg.
+# El offset          : -0.18 deg.
 #!!! Offset of the antenna pointing system must be set 0 !!!
 
 [Interpolation]

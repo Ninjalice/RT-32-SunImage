@@ -18,7 +18,7 @@ class Weather:
     
 
 class Antenna:
-    def __init__(self, az_offset0=+0.01, el_offset0=+0.18, az_offset2=0.0, el_offset2=0.0, description="Default Antenna"):
+    def __init__(self, az_offset0=0.08, el_offset0=-0.17, az_offset2=0.0, el_offset2=0.0, description="Default Antenna"):
         self.az_offset0 = az_offset0
         self.el_offset0 = el_offset0
         self.az_offset2 = az_offset2
@@ -210,10 +210,10 @@ class SpiralSunObservation:
             
             file1.write(f"# Az@Start Time      : {self.az_start:.5f} deg.\n")
             file1.write(f"# El@Start Time      : {self.el_start:.5f} deg.\n")
-            file1.write(f"# Start Time (UTC+0) : {self.start_time.iso}\n")        
+            file1.write(f"# Start Time (UTC+0) : {self.start_time.isot}\n")        
             
-            file1.write(f"# End Time, (UTC), hours: {Time(self.utime_end, format='jd').iso}\n")
-            file1.write(f"# Mean observation time (UTC): {Time(self.utime_mean, format='jd').iso}\n")
+            file1.write(f"# End Time, (UTC), hours: {Time(self.utime_end, format='jd').isot}\n")
+            file1.write(f"# Mean observation time (UTC): {Time(self.utime_mean, format='jd').isot}\n")
             file1.write(f"# Az offset          : {self.antenna.az_offset0} deg.\n")
             file1.write(f"# El offset          : {self.antenna.el_offset0} deg.\n")
             file1.write("#!!! Offset of the antenna pointing system must be set 0 !!!\n")
@@ -228,7 +228,7 @@ class SpiralSunObservation:
 
         
             for i in range(len(utc)):
-                file1.write(f"{Time(utc[i], format='jd').isot}.00 \t\t {az_anten[i]:.5f} \t\t {el_anten[i]:.5f}\n")
+                file1.write(f"{Time(utc[i], format='jd').isot} \t\t {az_anten[i]:.5f} \t\t {el_anten[i]:.5f}\n")
 
         print('-------------------------------------------------------------')
         print('Saved: ', self.file_name1, "  ",  len(utc), "  points")
@@ -298,8 +298,21 @@ def seconds_to_time(year, month, day, seconds):
     time = Time(f"{year}-{month:02d}-{day:02d} {hours}:{minutes}:{remaining_seconds}")
     return time.isot
 
-
 def bintable_to_pandas(file_path, hdu_number):
+    try:
+        # Leer la tabla binaria del archivo FITS
+        table = Table.read(file_path, hdu=hdu_number)
+
+        # Convertir la tabla en un DataFrame de Pandas
+        df = table.to_pandas()
+
+       
+        return df
+    except Exception as e:
+        print("Error:", e)
+        return None
+    
+def bintable_to_pandas_OLD(file_path, hdu_number):
     try:
         # Leer la tabla binaria del archivo FITS
         table = Table.read(file_path, hdu=hdu_number)
@@ -336,130 +349,6 @@ def bintable_to_pandas(file_path, hdu_number):
     except Exception as e:
         print("Error:", e)
         return None
-    
-def getFinalProcessedDataOLD(observation , sunPositionDf , data_df):
-    # Convertir Julian_Time a objetos Time de astropy
-    time = Time(sunPositionDf['UTC'], format='jd')
-
-    # Calcular las horas decimales con precisión de milisegundos para cada valor
-    decimal_seconds = []
-
-    for datetime_obj in time.datetime:
-        seconds = time_to_seconds(datetime_obj)
-        decimal_seconds.append(seconds)    
-
-    # Agregar las horas decimales al DataFrame
-    sunPositionDf['UTC'] =  np.round(np.array(decimal_seconds).astype(float), 3)
-
-    print("Interpolating data...")
-
-    columns = sunPositionDf.columns
-    interpolated_values = np.empty((sunPositionDf.shape[0] * 1000, sunPositionDf.shape[1]))
-    for i, col in enumerate(columns):
-        for j in range(len(sunPositionDf)-1):
-            interpolated_values[j*1000:(j+1)*1000, i] = np.linspace(sunPositionDf.iloc[j][col], sunPositionDf.iloc[j+1][col], 1001)[0:-1]
-
-
-    interpolated_df = pd.DataFrame(interpolated_values, columns=columns)
-    pd.set_option('display.float_format', '{:.10f}'.format)
-    
-
-    print("Filtering data...")
-
-    # Performs merging of DataFrames using different column names
-    data_df['UTC_11_4_11_90GHZ'] = data_df['UTC_11_4_11_90GHZ'].astype('float64').round(3)
-    interpolated_df['UTC'] = interpolated_df['UTC'].round(3)
-    merged_df = pd.merge(interpolated_df, data_df, left_on='UTC', right_on='UTC_11_4_11_90GHZ')
-
-    #['t_cal', 't1', 't2', 't3', 't4', 't5','t_slew','t_cal_2','t_slew_2']
-    num_scan = 5
-    t_scan_cumsum = np.linspace(0, 4 , 5) * observation.t_scan + observation.t_start_seconds
-
-    def filter_dataframe(df, start, end):
-        return df[(df['UTC'] >= start) & (df['UTC'] <= end)]
-
-
-    filtered_dfs = {}
-    cal_df_centre = []
-    cal_df_sky = []
-
-    columns_to_remove =  ["UTC","SunX","SunY" , "UTC_11_4_11_90GHZ"]
-
-    print(merged_df.columns)
-
-
-    # Realizar 5 iteraciones
-    for i, start_seconds in enumerate(t_scan_cumsum):
-        
-        start_t_cal_1 = start_seconds
-        end_t_cal_1 = start_seconds + observation.times_sec_dic['t_cal']
-
-        start_t_slew_1 = start_seconds + observation.times_sec_dic['t5'] 
-        end_t_slew_1 = start_seconds + observation.times_sec_dic['t_slew']
-
-        start_t_cal_2 = start_seconds + observation.times_sec_dic['t_slew'] 
-        end_t_cal_2 = start_seconds + observation.times_sec_dic['t_cal_2']
-
-        start_t_slew_2 = start_seconds + observation.times_sec_dic['t_cal_2'] 
-        end_t_slew_2 = start_seconds + observation.times_sec_dic['t_slew_2']
-
-        # Definir los filtros para cada iteración
-        filters = [
-            ('filter_it_{}_t_cal_1'.format(i+1), start_t_cal_1, end_t_cal_1),
-            ('filter_it_{}_t_slew_2'.format(i+1), start_t_slew_1, end_t_slew_1),
-            ('filter_it_{}_t_cal_2'.format(i+1), start_t_cal_2, end_t_cal_2),
-            ('filter_it_{}_t_slew_3'.format(i+1), start_t_slew_2, end_t_slew_2)
-        ]
-        
-        # Apply filters and store the filtered dataframes    
-        for filter_name, start, end in filters:
-            if (filter_name.endswith("t_cal_1")):
-                cal_df_centre.append(filter_dataframe(merged_df, start, end).drop(columns=columns_to_remove).mean().values)
-            elif (filter_name.endswith("t_cal_2")):
-                cal_df_sky.append(filter_dataframe(merged_df, start, end).drop(columns=columns_to_remove).mean().values)
-            filtered_dfs[filter_name] = filter_dataframe(merged_df, start, end)
-
-
-    print("Calibrating data...")
-
-    # Combine indices of filtered rows
-    filtered_indices = set().union(*[filtered_df.index for filtered_df in filtered_dfs.values()])
-
-    # Get the rest of the DataFrame excluding the filtered rows
-    rest_of_df = merged_df[~merged_df.index.isin(filtered_indices)]
-
-    cal_df_centre = np.array(cal_df_centre)
-    cal_df_sky = np.array(cal_df_sky)
-
-    
-    max_vect = np.min(cal_df_centre , axis=0)
-    min_vect = np.max(cal_df_sky , axis=0)
-    
-    print("Cantre max: ", max_vect)
-    print("Sky min: ", min_vect)
-
-    rest_of_df['RCP_11_4_11_90GHZ'] = (rest_of_df['RCP_11_4_11_90GHZ'] - min_vect[0]) / (max_vect[0] - min_vect[0])
-    rest_of_df['LCP_11_4_11_90GHZ'] = (rest_of_df['LCP_11_4_11_90GHZ'] - min_vect[1]) / (max_vect[1] - min_vect[1])
-
- 
-
-    #     # Crea el objeto MinMaxScaler
-    # scaler = MinMaxScaler(feature_range=(0, 3))
-
-    # # Ajusta y transforma los datos
-    # rest_of_df['STOKE_I_11_4_11_90GHZ'] = scaler.fit_transform(rest_of_df[['STOKE_I_11_4_11_90GHZ']])
-
-
-
-    # scaler = MinMaxScaler()
-    # rest_of_df['Filtered_RCP_11_4_11_90GHZ'] = scaler.fit_transform(rest_of_df[['Filtered_RCP_11_4_11_90GHZ']])
-    # rest_of_df['RCP_11_4_11_90GHZ'] = scaler.fit_transform(rest_of_df[['RCP_11_4_11_90GHZ']])
-
-    filtered_sunDf = rest_of_df[(rest_of_df['SunX']**2 + rest_of_df['SunY']**2) <= 20**2].copy()
-
-    rest_of_df["isoT_time"] = rest_of_df.apply(lambda row: seconds_to_time(observation.year, observation.month, observation.day,row["UTC"]), axis=1)
-    return rest_of_df
-
 
 def getFinalProcessedData(observation, sunPositionDf, data_dfs):
 
@@ -483,17 +372,22 @@ def getFinalProcessedData(observation, sunPositionDf, data_dfs):
     interpolated_df = pd.DataFrame(interpolated_values, columns=columns)
     pd.set_option('display.float_format', '{:.10f}'.format)
 
-    print("Filtering data...")
+    print("Filtering data...")   
 
     # Diccionario para almacenar los DataFrames procesados por banda
     band_processed_dfs = {}
 
     for band, data_df in data_dfs.items():
         data_df[f'UTC_{band}'] = data_df[f'UTC_{band}'].astype('float64').round(3)
-        interpolated_df['UTC'] = interpolated_df['UTC'].round(3)
+        
+        interpolated_df['UTC'] = interpolated_df['UTC'].round(3)        
+
         merged_df = pd.merge(interpolated_df, data_df, left_on='UTC', right_on=f'UTC_{band}')
 
-        num_scan = 5
+        merged_df['SunX'] = merged_df['SunX'] + observation.antenna.az_offset0
+        merged_df['SunY'] = merged_df['SunY'] + observation.antenna.el_offset0
+
+      
         t_scan_cumsum = np.linspace(0, 4, 5) * observation.t_scan + observation.t_start_seconds
 
         def filter_dataframe(df, start, end):
@@ -548,7 +442,8 @@ def getFinalProcessedData(observation, sunPositionDf, data_dfs):
         rest_of_df[f'STOKE_I_{band}'] = (rest_of_df[f'STOKE_I_{band}'] - min_vect[0]) / (max_vect[0] - min_vect[0])
         rest_of_df[f'STOKE_V_{band}'] = (rest_of_df[f'STOKE_V_{band}'] - min_vect[1]) / (max_vect[1] - min_vect[1])
 
-        filtered_sunDf = rest_of_df[(rest_of_df['SunX']**2 + rest_of_df['SunY']**2) <= 20**2].copy()
+        print(rest_of_df.describe())
+     
         rest_of_df["isoT_time"] = rest_of_df.apply(lambda row: seconds_to_time(observation.year, observation.month, observation.day, row["UTC"]), axis=1)
         band_processed_dfs[band] = rest_of_df
 
@@ -628,7 +523,8 @@ def createImages():
     return True
 
 def process_all_heliocentric_coordinates(band_processed_dfs, observation):
-    def process_heliocentric_coordinates(band_df, observation):
+    def process_heliocentric_coordinates(band_df, observation):       
+
         coordsXHelio = []
         coordsYHelio = []
 
@@ -636,8 +532,8 @@ def process_all_heliocentric_coordinates(band_processed_dfs, observation):
         times = [Time(t) for t in band_df['isoT_time']]
 
         # Calculate the sun's positions for each time in the list
-        az_sun = observation.sun_location.transform_to(AltAz(obstime=times, location=observation.antenna.location)).az.deg
-        el_sun = observation.sun_location.transform_to(AltAz(obstime=times, location=observation.antenna.location)).alt.deg
+        az_sun = observation.sun_location.transform_to(AltAz(obstime=times, location=observation.antenna.location)).az.deg  + observation.antenna.az_offset0
+        el_sun = observation.sun_location.transform_to(AltAz(obstime=times, location=observation.antenna.location)).alt.deg + observation.antenna.el_offset0
 
         az_anten = az_sun + band_df['SunX'] / np.cos(np.deg2rad(el_sun)) / 60.
         el_anten = el_sun + band_df['SunY'] / 60.    
@@ -658,6 +554,7 @@ def process_all_heliocentric_coordinates(band_processed_dfs, observation):
             frame_altaz = AltAz(obstime=Time(obstime), location=observation.antenna.location)
             sun_helio = SkyCoord(alt=el_deg, az=az_deg, observer='earth', distance=sun.earth_distance(obstime), frame=frame_altaz).transform_to(frames.Helioprojective)
 
+            
             # Append the transformed coordinates to the list
             coordsXHelio.append(sun_helio.Tx.value)
             coordsYHelio.append(sun_helio.Ty.value)
