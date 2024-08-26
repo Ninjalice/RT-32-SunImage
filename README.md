@@ -1,6 +1,5 @@
 # Imaging of multidimensional spectropolarimetric maps of the Sun obtained by Irbene radio astronomical observations.
 
-
 The objective of the work is to develop open source tool, which is based on Python
 astronomical libraries, to produce 1D, 2D and 3D maps of Sun. Imaging will be based on regular
 microwave solar observations conducted by VIRAC on radio telescope RT-32. For the
@@ -21,7 +20,7 @@ modified Richardson-Lucy (MLM) methods.
 
 ---
 
-![Sun image](images/endika_stokesI_240425_4GHz.png)
+![Sun image](project_image.jpg)
 
 ---
 
