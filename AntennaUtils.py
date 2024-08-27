@@ -8,6 +8,10 @@ from sklearn.preprocessing import MinMaxScaler
 from scipy.signal import savgol_filter
 import astropy.units as u
 from sunpy.coordinates import frames, sun
+import matplotlib.pyplot as plt
+import sunpy.map
+from scipy.interpolate import Rbf
+import os
 
 class Weather:
     def __init__(self , temperature, pressure, relative_humidity, obswl):
@@ -56,8 +60,8 @@ class SpiralSunObservation:
         self.t_start_seconds = time_to_seconds(self.start_time.datetime)
 
         self.sun_location = get_sun(self.start_time)
-        self.az_start, self.el_start = self.sun_location.transform_to(AltAz(obstime=self.start_time, location=self.antenna.location)).az, \
-                                self.sun_location.transform_to(AltAz(obstime=self.start_time, location=self.antenna.location)).alt
+        self.az_start, self.el_start = self.sun_location.transform_to(AltAz(obstime=self.start_time, location=self.antenna.location, pressure=self.weather.pressure , temperature=self.weather.temperature, relative_humidity=self.weather.relative_humidity ,obswl=self.weather.obswl )).az, \
+                                self.sun_location.transform_to(AltAz(obstime=self.start_time, location=self.antenna.location, pressure=self.weather.pressure , temperature=self.weather.temperature, relative_humidity=self.weather.relative_humidity ,obswl=self.weather.obswl)).alt
 
         self.file_out = f"{(year - 2000):02d}{month:02d}{day:02d}_{hour_start:02d}{minute_start:02d}"
         self.file_name1 = f"sun_scan_{self.file_out}.ptf"       
@@ -92,7 +96,7 @@ class SpiralSunObservation:
         self.utime_mean = self.utime_start + self.time_session / 2.  # mean UT time of session
         self.utime_end = self.utime_start + self.time_session  # end UT time of session
         
-    
+
     def calculatePositions(self):
         print("Starting calculation")
         # Calculate coordinates
@@ -182,8 +186,8 @@ class SpiralSunObservation:
         yy1 = xx * np.sin(np.deg2rad(q)) + yy * np.cos(np.deg2rad(q))
 
         
-        az_sun = self.sun_location.transform_to(AltAz(obstime=Time(utc, format='jd'), location=self.antenna.location)).az.deg
-        el_sun = self.sun_location.transform_to(AltAz(obstime=Time(utc, format='jd'), location=self.antenna.location)).alt.deg
+        az_sun = self.sun_location.transform_to(AltAz(obstime=Time(utc, format='jd'), location=self.antenna.location, pressure=self.weather.pressure , temperature=self.weather.temperature, relative_humidity=self.weather.relative_humidity ,obswl=self.weather.obswl)).az.deg
+        el_sun = self.sun_location.transform_to(AltAz(obstime=Time(utc, format='jd'), location=self.antenna.location, pressure=self.weather.pressure , temperature=self.weather.temperature, relative_humidity=self.weather.relative_humidity ,obswl=self.weather.obswl)).alt.deg
 
         az_anten = az_sun + xx1 / np.cos(np.deg2rad(el_sun)) / 60.
         el_anten = el_sun + yy1 / 60.    
@@ -234,6 +238,122 @@ class SpiralSunObservation:
         print('Saved: ', self.file_name1, "  ",  len(utc), "  points")
         return True
 
+    def createImages(self,fit_file_path):
+
+        #CONSTANTS
+        hdu_number = 1  # Number of the extension containing the binary table
+        path = ''
+
+        #DATA CALCULATION:
+        az_anten, el_anten , az_sun , el_sun , xx1 , yy1, utc = self.calculatePositions()
+        self.generateFile(path, az_anten , el_anten , utc)  
+
+        # Converts the binary table to a Pandas DataFrame
+        data_df = bintable_to_pandas_OLD(fit_file_path, hdu_number)
+        
+        band_data_dfs = processData(data_df)
+
+        sunPositionDf = pd.DataFrame({'UTC': utc,'SunX': xx1, 'SunY': yy1  })
+
+        processed_dfs = getFinalProcessedData(self , sunPositionDf,band_data_dfs)
+
+        band_processed_helio_dfs = process_all_heliocentric_coordinates(processed_dfs, self )
+
+        # Define the target directory
+        directory = f'{self.year}-{self.month}-{self.day}T{self.hour_start}_{self.minute_start}_00'
+        
+        # Create the directory if it doesn't exist
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+        bands = ['4.07GHZ', '6.42GHZ', '8.40GHZ', '9.80GHZ', '11.90GHZ']
+
+        for band in bands:
+            SunX = band_processed_helio_dfs[band]['tx_helio_anten']
+            SunY = band_processed_helio_dfs[band]['ty_helio_anten']
+            STOKE_I = band_processed_helio_dfs[band][f'STOKE_I_{band}'].values
+            STOKE_V = band_processed_helio_dfs[band][f'STOKE_V_{band}'].values
+
+            # Define the grid covering the helioprojective coordinate space
+            tx_min, tx_max = -1200, 1200
+            ty_min, ty_max = -1200, 1200
+            grid_step = 10  # Adjust as needed
+
+            # Create a grid
+            tx, ty = np.meshgrid(np.arange(tx_min, tx_max, grid_step),
+                                np.arange(ty_min, ty_max, grid_step))
+
+            # Interpolate power values for each point on the grid using Rbf
+            rbf = Rbf(SunX, SunY, STOKE_I, function='linear')
+            interp_power_STOKE_I = rbf(tx, ty)
+
+            # Create a grid
+            tx, ty = np.meshgrid(np.arange(tx_min, tx_max, grid_step),
+                                np.arange(ty_min, ty_max, grid_step))
+
+            # Interpolate power values for each point on the grid using Rbf
+            rbf = Rbf(SunX, SunY, STOKE_V, function='linear')
+            interp_power_STOKE_V = rbf(tx, ty)    
+
+
+            # Define metadata for the solar map
+            metadata = {
+                'date-obs': f'{self.year}-{self.month}-{self.day}T{self.hour_start}:{self.minute_start}:00',  # Adjust this to the correct observation date
+                'crval1': 0,
+                'crval2': 0,
+                'cdelt1': grid_step,
+                'cdelt2': grid_step,
+                'cunit1': 'arcsec',
+                'cunit2': 'arcsec',
+                'ctype1': 'HPLN-TAN',
+                'ctype2': 'HPLT-TAN',
+                'crpix1': (tx_max - tx_min) / (2 * grid_step),
+                'crpix2': (ty_max - ty_min) / (2 * grid_step),
+                'waveunit': 'm',
+                'wavelnth': 0.0262897 * u.m,
+                'obsrvtry': 'Ventspils International Radio Astronomy Center',
+                'detector': 'LNSP4',
+                'dsun_obs': 1 * u.AU,
+                'hglt_obs': 0 * u.deg,
+                'hgln_obs': 0 * u.deg,
+            }
+
+            # Create a map using the interpolated power values and metadata STOKE I
+            interpolated_map = sunpy.map.Map((interp_power_STOKE_I, metadata))
+
+            # Plot the interpolated map using a heatmap with the 'hot' colormap
+            plt.ioff()
+            plt.figure(figsize=(8, 8))
+            interpolated_map.plot(cmap='gist_heat')
+            interpolated_map.draw_limb(color="k")
+            interpolated_map.draw_grid(color="k")
+            plt.colorbar(label='Power')
+            plt.title(f'Interpolated Solar STOKE I Map {band}')
+            plt.xlabel('Helioprojective Tx (arcsec)')
+            plt.ylabel('Helioprojective Ty (arcsec)')
+            plt.grid(True)   
+            name = f'{directory}/LNSP4-{directory}-STOKE_I-{band}.jpeg'
+            plt.savefig(name, format='jpeg', dpi=300)     
+            plt.close()
+
+            # Create a map using the interpolated power values and metadata STOKE V
+            interpolated_map = sunpy.map.Map((interp_power_STOKE_V, metadata))
+
+            # Plot the interpolated map using a heatmap with the 'hot' colormap
+            plt.ioff()
+            plt.figure(figsize=(8, 8))
+            interpolated_map.plot(cmap='nipy_spectral')
+            interpolated_map.draw_limb(color="k")
+            interpolated_map.draw_grid(color="k")
+            plt.colorbar(label='Power')
+            plt.title(f'Interpolated Solar STOKE V Map {band}')
+            plt.xlabel('Helioprojective Tx (arcsec)')
+            plt.ylabel('Helioprojective Ty (arcsec)')
+            plt.grid(True)
+            name = f'{directory}/LNSP4-{directory}-STOKE_V-{band}.jpeg'
+            plt.savefig(name, format='jpeg', dpi=300)   
+            plt.close()
+        
 
 def RT32_SUN_PARA(utc , location):
     # Define constants
@@ -436,11 +556,16 @@ def getFinalProcessedData(observation, sunPositionDf, data_dfs):
         cal_df_centre = np.array(cal_df_centre)
         cal_df_sky = np.array(cal_df_sky)
 
-        max_vect = np.min(cal_df_centre, axis=0)
-        min_vect = np.max(cal_df_sky, axis=0)
+        sun_centre_means = np.mean(cal_df_centre, axis=0) 
+        sky_means = np.mean(cal_df_sky, axis=0)
 
-        rest_of_df[f'STOKE_I_{band}'] = (rest_of_df[f'STOKE_I_{band}'] - min_vect[0]) / (max_vect[0] - min_vect[0])
-        rest_of_df[f'STOKE_V_{band}'] = (rest_of_df[f'STOKE_V_{band}'] - min_vect[1]) / (max_vect[1] - min_vect[1])
+        print(cal_df_centre,cal_df_sky)
+
+        rest_of_df[f'RCP_{band}'] = (rest_of_df[f'RCP_{band}'] - sky_means[0]) / (sun_centre_means[0] - sky_means[0])
+        rest_of_df[f'LCP_V_{band}'] = (rest_of_df[f'RCP_{band}'] - sky_means[0]) / (sun_centre_means[0] - sky_means[0])
+
+        rest_of_df[f'STOKE_I_{band}'] = (rest_of_df[f'RCP_{band}'] + rest_of_df[f'LCP_{band}']) / 2
+        rest_of_df[f'STOKE_V_{band}'] = (rest_of_df[f'RCP_{band}'] - rest_of_df[f'LCP_{band}']) / 2
 
         print(rest_of_df.describe())
      
@@ -500,8 +625,8 @@ def processData(data_df):
         RCP = data_df[f'RCP {band}'].dropna()
         LCP = data_df[f'LCP {band}'].dropna()
 
-        STOKE_I = (RCP.values + LCP.values) / 2 
-        STOKE_V = ( RCP.values - LCP.values) / 2 
+        # STOKE_I = (RCP.values + LCP.values) / 2 
+        # STOKE_V = ( RCP.values - LCP.values) / 2 
 
         # print(STOKE_I_11_4_11_90GHZ.size)
         # print(STOKE_V_11_4_11_90GHZ.size)
@@ -510,8 +635,8 @@ def processData(data_df):
         # Crear DataFrame para la banda actual
         band_df = pd.DataFrame({
             f'UTC_{band}': UTC_RCP.values,          
-            f'STOKE_I_{band}': STOKE_I,
-            f'STOKE_V_{band}': STOKE_V
+            f'RCP_{band}': RCP,
+            f'LCP_{band}': LCP
         })
 
         # Almacenar en el diccionario
@@ -519,8 +644,7 @@ def processData(data_df):
 
     return band_dfs
 
-def createImages():
-    return True
+
 
 def process_all_heliocentric_coordinates(band_processed_dfs, observation):
     def process_heliocentric_coordinates(band_df, observation):       
@@ -532,8 +656,8 @@ def process_all_heliocentric_coordinates(band_processed_dfs, observation):
         times = [Time(t) for t in band_df['isoT_time']]
 
         # Calculate the sun's positions for each time in the list
-        az_sun = observation.sun_location.transform_to(AltAz(obstime=times, location=observation.antenna.location)).az.deg  + observation.antenna.az_offset0
-        el_sun = observation.sun_location.transform_to(AltAz(obstime=times, location=observation.antenna.location)).alt.deg + observation.antenna.el_offset0
+        az_sun = observation.sun_location.transform_to(AltAz(obstime=times, location=observation.antenna.location, pressure=observation.weather.pressure , temperature=observation.weather.temperature, relative_humidity=observation.weather.relative_humidity ,obswl=observation.weather.obswl)).az.deg  + observation.antenna.az_offset0
+        el_sun = observation.sun_location.transform_to(AltAz(obstime=times, location=observation.antenna.location, pressure=observation.weather.pressure , temperature=observation.weather.temperature, relative_humidity=observation.weather.relative_humidity ,obswl=observation.weather.obswl)).alt.deg + observation.antenna.el_offset0
 
         az_anten = az_sun + band_df['SunX'] / np.cos(np.deg2rad(el_sun)) / 60.
         el_anten = el_sun + band_df['SunY'] / 60.    
@@ -551,7 +675,7 @@ def process_all_heliocentric_coordinates(band_processed_dfs, observation):
             obstime = row['isoT_time']
 
             # Convertir a coordenadas heliocéntricas
-            frame_altaz = AltAz(obstime=Time(obstime), location=observation.antenna.location)
+            frame_altaz = AltAz(obstime=Time(obstime), location=observation.antenna.location, pressure=observation.weather.pressure , temperature=observation.weather.temperature, relative_humidity=observation.weather.relative_humidity ,obswl=observation.weather.obswl)
             sun_helio = SkyCoord(alt=el_deg, az=az_deg, observer='earth', distance=sun.earth_distance(obstime), frame=frame_altaz).transform_to(frames.Helioprojective)
 
             
