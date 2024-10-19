@@ -2,10 +2,7 @@ import numpy as np
 from astropy.time import Time
 from astropy.coordinates import EarthLocation, AltAz, get_sun ,SkyCoord
 from astropy.table import Table
-from AntennaUtils import *
 import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
-from scipy.signal import savgol_filter
 import astropy.units as u
 from sunpy.coordinates import frames, sun
 import matplotlib.pyplot as plt
@@ -98,7 +95,6 @@ class SpiralSunObservation:
         
 
     def calculatePositions(self):
-        print("Starting calculation")
         # Calculate coordinates
         x = np.zeros(700)
         y = np.zeros(700)
@@ -248,15 +244,20 @@ class SpiralSunObservation:
         az_anten, el_anten , az_sun , el_sun , xx1 , yy1, utc = self.calculatePositions()
         self.generateFile(path, az_anten , el_anten , utc)  
 
+        print('-------------------------------------------------------------')
+        print('Start processing the FITS file:', fit_file_path)
         # Converts the binary table to a Pandas DataFrame
-        data_df = bintable_to_pandas_OLD(fit_file_path, hdu_number)
-        
+        data_df = bintable_to_pandas(fit_file_path, hdu_number)        
+  
+        print('Processing the data...')
         band_data_dfs = processData(data_df)
 
         sunPositionDf = pd.DataFrame({'UTC': utc,'SunX': xx1, 'SunY': yy1  })
 
+        print('Getting final processed data...')
         processed_dfs = getFinalProcessedData(self , sunPositionDf,band_data_dfs)
 
+        print('Processing heliocentric coordinates...')
         band_processed_helio_dfs = process_all_heliocentric_coordinates(processed_dfs, self )
 
         # Define the target directory
@@ -268,6 +269,7 @@ class SpiralSunObservation:
 
         bands = ['4.07GHZ', '6.42GHZ', '8.40GHZ', '9.80GHZ', '11.90GHZ']
 
+        print('Creating solar maps...')
         for band in bands:
             SunX = band_processed_helio_dfs[band]['tx_helio_anten']
             SunY = band_processed_helio_dfs[band]['ty_helio_anten']
@@ -313,9 +315,13 @@ class SpiralSunObservation:
                 'wavelnth': 0.0262897 * u.m,
                 'obsrvtry': 'Ventspils International Radio Astronomy Center',
                 'detector': 'LNSP4',
-                'dsun_obs': 1 * u.AU,
+                'dsun_ref': 149597870691,
+                'dsun_obs': 151846026489 ,
+                'rsun': 1573.89688496,
+                'rsun_ref': 696000000 ,                           
                 'hglt_obs': 0 * u.deg,
-                'hgln_obs': 0 * u.deg,
+                'hgln_obs': 0 * u.deg,              
+                
             }
 
             # Create a map using the interpolated power values and metadata STOKE I
@@ -323,14 +329,20 @@ class SpiralSunObservation:
 
             # Plot the interpolated map using a heatmap with the 'hot' colormap
             plt.ioff()
-            plt.figure(figsize=(8, 8))
-            interpolated_map.plot(cmap='gist_heat')
-            interpolated_map.draw_limb(color="k")
-            interpolated_map.draw_grid(color="k")
+            plt.rcParams['text.color'] = 'white'
+            plt.rcParams['axes.labelcolor'] = 'white'
+            plt.rcParams['xtick.color'] = 'white'
+            plt.rcParams['ytick.color'] = 'white'   
+            fig = plt.figure(figsize=(8, 8))
+            fig.patch.set_facecolor('black')            
+            ax = fig.add_subplot(projection=interpolated_map)           
+            interpolated_map.plot(axes=ax,cmap='gist_heat')
+            interpolated_map.draw_limb(axes=ax)
+            interpolated_map.draw_grid(axes=ax)
             plt.colorbar(label='Power')
-            plt.title(f'Interpolated Solar STOKE I Map {band}')
-            plt.xlabel('Helioprojective Tx (arcsec)')
-            plt.ylabel('Helioprojective Ty (arcsec)')
+            plt.title(f'STOKE I | {band} {self.year}-{self.month:02d}-{self.day:02d}T{self.hour_start:02d}:{self.minute_start:02d}')
+            plt.xlabel('X (arcsec)')
+            plt.ylabel('Y (arcsec)')
             plt.grid(True)   
             name = f'{directory}/LNSP4-{directory}-STOKE_I-{band}.jpeg'
             plt.savefig(name, format='jpeg', dpi=300)     
@@ -341,14 +353,20 @@ class SpiralSunObservation:
 
             # Plot the interpolated map using a heatmap with the 'hot' colormap
             plt.ioff()
-            plt.figure(figsize=(8, 8))
-            interpolated_map.plot(cmap='nipy_spectral')
-            interpolated_map.draw_limb(color="k")
-            interpolated_map.draw_grid(color="k")
+            plt.rcParams['text.color'] = 'white'
+            plt.rcParams['axes.labelcolor'] = 'white'
+            plt.rcParams['xtick.color'] = 'white'
+            plt.rcParams['ytick.color'] = 'white'   
+            fig = plt.figure(figsize=(8, 8))
+            fig.patch.set_facecolor('black')            
+            ax = fig.add_subplot(projection=interpolated_map)           
+            interpolated_map.plot(axes=ax,cmap='nipy_spectral')
+            interpolated_map.draw_limb(axes=ax)
+            interpolated_map.draw_grid(axes=ax)         
             plt.colorbar(label='Power')
-            plt.title(f'Interpolated Solar STOKE V Map {band}')
-            plt.xlabel('Helioprojective Tx (arcsec)')
-            plt.ylabel('Helioprojective Ty (arcsec)')
+            plt.title(f'STOKE V | {band} {self.year}-{self.month:02d}-{self.day:02d}T{self.hour_start:02d}:{self.minute_start:02d}')
+            plt.xlabel('X (arcsec)')
+            plt.ylabel('Y (arcsec)')
             plt.grid(True)
             name = f'{directory}/LNSP4-{directory}-STOKE_V-{band}.jpeg'
             plt.savefig(name, format='jpeg', dpi=300)   
@@ -425,7 +443,6 @@ def bintable_to_pandas(file_path, hdu_number):
 
         # Convertir la tabla en un DataFrame de Pandas
         df = table.to_pandas()
-
        
         return df
     except Exception as e:
@@ -435,8 +452,43 @@ def bintable_to_pandas(file_path, hdu_number):
 def bintable_to_pandas_OLD(file_path, hdu_number):
     try:
         # Leer la tabla binaria del archivo FITS
-        table = Table.read(file_path, hdu=hdu_number)
+        table = Table.read(file_path, hdu=hdu_number)        
+        # Crear una lista para almacenar las filas descomprimidas
+        rows = []
+        # Iterar sobre cada columna de la tabla
+        for colname in table.colnames:
+            # Verificar si la columna contiene un array
+            if isinstance(table[colname][0], np.ndarray):
+                # Iterar sobre cada elemento del array
+                for i in range(len(table[colname][0])):
+                    # Crear un diccionario para la nueva fila
+                    new_row_dict = {}
+                    # Iterar sobre cada columna nuevamente para llenar la nueva fila
+                    for colname_inner in table.colnames:
+                        if isinstance(table[colname_inner][0], np.ndarray):
+                            new_row_dict[colname_inner] = table[colname_inner][0][i]
+                        else:
+                            new_row_dict[colname_inner] = table[colname_inner][0]
+                    rows.append(new_row_dict)
+            else:
+                # Si la columna no contiene un array, agregar la fila original
+                row_dict = {colname: table[colname][0] for colname in table.colnames}
+                rows.append(row_dict)
+            # Convertir la lista de diccionarios en una nueva tabla
+            table_descompressed = Table(rows)        
+            # Convertir la tabla filtrada en un DataFrame de Pandas
+            df = table_descompressed.to_pandas()     
 
+            return df 
+        
+    except Exception as e:
+        print("Error:", e)
+        return None
+     
+def bintable_to_pandas_OLD_BROKEN(file_path, hdu_number):
+    try:
+        # Leer la tabla binaria del archivo FITS
+        table = Table.read(file_path, hdu=hdu_number)     
         # Crear una lista para almacenar las filas descomprimidas
         rows = []
 
@@ -481,8 +533,6 @@ def getFinalProcessedData(observation, sunPositionDf, data_dfs):
     # Agregar las horas decimales al DataFrame
     sunPositionDf['UTC'] = np.round(np.array(decimal_seconds).astype(float), 3)
 
-    print("Interpolating data...")
-
     columns = sunPositionDf.columns
     interpolated_values = np.empty((sunPositionDf.shape[0] * 1000, sunPositionDf.shape[1]))
     for i, col in enumerate(columns):
@@ -492,16 +542,15 @@ def getFinalProcessedData(observation, sunPositionDf, data_dfs):
     interpolated_df = pd.DataFrame(interpolated_values, columns=columns)
     pd.set_option('display.float_format', '{:.10f}'.format)
 
-    print("Filtering data...")   
-
     # Diccionario para almacenar los DataFrames procesados por banda
     band_processed_dfs = {}
 
     for band, data_df in data_dfs.items():
         data_df[f'UTC_{band}'] = data_df[f'UTC_{band}'].astype('float64').round(3)
         
-        interpolated_df['UTC'] = interpolated_df['UTC'].round(3)        
+        interpolated_df['UTC'] = interpolated_df['UTC'].round(3)               
 
+        
         merged_df = pd.merge(interpolated_df, data_df, left_on='UTC', right_on=f'UTC_{band}')
 
         merged_df['SunX'] = merged_df['SunX'] + observation.antenna.az_offset0
@@ -517,9 +566,7 @@ def getFinalProcessedData(observation, sunPositionDf, data_dfs):
         cal_df_centre = []
         cal_df_sky = []
 
-        columns_to_remove = ["UTC", "SunX", "SunY", f'UTC_{band}']
-
-        print(merged_df.columns)
+        columns_to_remove = ["UTC", "SunX", "SunY", f'UTC_{band}']       
 
         for i, start_seconds in enumerate(t_scan_cumsum):
             start_t_cal_1 = start_seconds
@@ -548,8 +595,6 @@ def getFinalProcessedData(observation, sunPositionDf, data_dfs):
                     cal_df_sky.append(filter_dataframe(merged_df, start, end).drop(columns=columns_to_remove).mean().values)
                 filtered_dfs[filter_name] = filter_dataframe(merged_df, start, end)
 
-        print("Calibrating data...")
-
         filtered_indices = set().union(*[filtered_df.index for filtered_df in filtered_dfs.values()])
         rest_of_df = merged_df[~merged_df.index.isin(filtered_indices)]
 
@@ -557,18 +602,14 @@ def getFinalProcessedData(observation, sunPositionDf, data_dfs):
         cal_df_sky = np.array(cal_df_sky)
 
         sun_centre_means = np.mean(cal_df_centre, axis=0) 
-        sky_means = np.mean(cal_df_sky, axis=0)
-
-        print(cal_df_centre,cal_df_sky)
+        sky_means = np.mean(cal_df_sky, axis=0)      
 
         rest_of_df[f'RCP_{band}'] = (rest_of_df[f'RCP_{band}'] - sky_means[0]) / (sun_centre_means[0] - sky_means[0])
-        rest_of_df[f'LCP_V_{band}'] = (rest_of_df[f'RCP_{band}'] - sky_means[0]) / (sun_centre_means[0] - sky_means[0])
+        rest_of_df[f'LCP_{band}'] = (rest_of_df[f'LCP_{band}'] - sky_means[0]) / (sun_centre_means[0] - sky_means[0])
 
         rest_of_df[f'STOKE_I_{band}'] = (rest_of_df[f'RCP_{band}'] + rest_of_df[f'LCP_{band}']) / 2
         rest_of_df[f'STOKE_V_{band}'] = (rest_of_df[f'RCP_{band}'] - rest_of_df[f'LCP_{band}']) / 2
 
-        print(rest_of_df.describe())
-     
         rest_of_df["isoT_time"] = rest_of_df.apply(lambda row: seconds_to_time(observation.year, observation.month, observation.day, row["UTC"]), axis=1)
         band_processed_dfs[band] = rest_of_df
 
@@ -576,7 +617,6 @@ def getFinalProcessedData(observation, sunPositionDf, data_dfs):
 
 
 def rename_columns(data_df):
-    print("Renaming columns")
     # Renombrar las columnas eliminando los dos primeros números y manteniendo los prefijos LCP y RCP
     renamed_columns = {
         col: f"{col.split()[0]} {col.split()[2]}"
@@ -610,8 +650,7 @@ def processData(data_df):
 
 
     data_df = rename_columns(data_df)
-
-    print(data_df.columns)
+    
     # Lista de bandas a procesar (sin los dos primeros números)
     bands = ['4.07GHZ', '6.42GHZ', '8.40GHZ', '9.80GHZ', '11.90GHZ']
 
