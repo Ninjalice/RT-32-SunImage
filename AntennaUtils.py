@@ -343,6 +343,8 @@ class SpiralSunObservation:
             plt.title(f'STOKE I | {band} {self.year}-{self.month:02d}-{self.day:02d}T{self.hour_start:02d}:{self.minute_start:02d}')
             plt.xlabel('X (arcsec)')
             plt.ylabel('Y (arcsec)')
+            circle = plt.Circle((0, 0), 960, color='white', fill=False, linewidth=2)
+            ax.add_artist(circle)
             plt.grid(True)   
             name = f'{directory}/LNSP4-{directory}-STOKE_I-{band}.jpeg'
             plt.savefig(name, format='jpeg', dpi=300)     

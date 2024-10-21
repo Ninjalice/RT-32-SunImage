@@ -1,6 +1,5 @@
 import pandas as pd
 import astropy.units as u
-import sunpy.util
 from AntennaUtils import *  
 import warnings
 
@@ -28,6 +27,6 @@ weather = Weather(temperature, pressure, relative_humidity, obswl)
 
 observation = SpiralSunObservation(weather,rt32_antenna , year , month , day , hour_start , minute_start)
 
-fit_file_path = "lnsp4_241018_163807_241018_163855.fit"
+fit_file_path = "lnsp4_5ch_241020_173655_241020_173725.fit"
 
 observation.createImages(fit_file_path)
